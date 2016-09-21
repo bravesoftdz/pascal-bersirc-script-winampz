@@ -1,0 +1,661 @@
+{ TODO : ID3 (useless when not listening to MP3)              }
+{ TODO : onSongStart, onSongEnd, onNewSong, onSameSong        }
+
+{ Full WinAmp API implementation & more                       }
+{ http://www.winamp.com/nsdn/winamp2x/dev/sdk/api.jhtml       }
+
+unit WinampAPI;
+
+uses Extras; // GetAmpTitle
+
+const
+  
+  // TODO (1.34.907) : GetWinampPath
+  // Play with these lines
+  WA_DIR = 'C:\Program Files\Winamp\';
+  WA_EXE = 'winamp.exe';
+  WA_M3U = WA_DIR + 'winamp.m3u';
+  WA_DELAY_START    = 1000; // Estimated time to start winamp
+  WA_DELAY_ACTIVATE = 100;  // Estimated time to activate running winamp
+  
+  WA_VERSION = 102;
+
+  // WinAmp Command Messages
+  WACM_TRACK_PREV       =       40044;
+  WACM_TRACK_NEXT       =       40048;
+  WACM_PLAY_CUR         =       40045;
+  WACM_PAUSE            =       40046;
+  WACM_CONTINUE         =       40046;
+  WACM_STOP             =       40047;
+  WACM_STOP_FADEOUT     =       40147;
+  WACM_STOP_AFTERENDED  =       40157;
+  WACM_FF_5SECS         =       40148;
+  WACM_FR_5SECS         =       40144;
+  WACM_PLAYLIST_START   =       40154;
+  WACM_PLAYLIST_END     =       40158;
+  WACM_OPEN_FILE        =       40029;
+  WACM_OPEN_URL         =       40155;
+  WACM_FILE_INFO        =       40188;
+  WACM_TIME_ELAPSED     =       40037;
+  WACM_TIME_REMAINING   =       40038;
+  WACM_PREFERENCES      =       40012;
+  WACM_VIZ_OPTIONS      =       40190;
+  WACM_VIZ_PLUGINOPTS   =       40191;
+  WACM_VIZ_EXEC         =       40192;
+  WACM_ABOUT            =       40041;
+  WACM_TITLE_SCROLL     =       40189;
+  WACM_ALWAYSONTOP      =       40019;
+  WACM_WINSH            =       40064;
+  WACM_WINSH_PL         =       40065;
+  WACM_DOUBLESIZE       =       40165;
+  WACM_EQ               =       40036;
+  WACM_PL               =       40040;
+  WACM_MAIN             =       40258;
+  WACM_BROWSER          =       40298;
+  WACM_EASYMOVE         =       40186;
+  WACM_VOL_RAISE        =       40058;
+  WACM_VOL_LOWER        =       40059;
+  WACM_REPEAT           =       40022;
+  WACM_SHUFFLE          =       40023;
+  WACM_OPEN_JUMPTIME    =       40193;
+  WACM_OPEN_JUMPFILE    =       40194;
+  WACM_OPEN_SKINSEL     =       40219;
+  WACM_VIZ_PLUGINCONF   =       40221;
+  WACM_SKIN_RELOAD      =       40291;
+  WACM_QUIT             =       40001;
+
+  // WinAmp User Messages
+  WAUM_VERSION          =       0;
+  WAUM_START_PLAYBACK   =       100;
+  WAUM_PLAYLIST_CLEAR   =       101;
+  WAUM_PLAY_SEL_TRACK   =       102;
+  WAUM_CHDIR            =       103;
+  WAUM_PLAYBACK_STATUS  =       104;
+  WAUM_PLAYBACK_POS     =       105;
+  WAUM_TRACK_LENGTH     =       105;
+  WAUM_PLAYBACK_SEEK    =       106;
+  WAUM_PLAYLIST_WRITE   =       120;
+  WAUM_PLAYLIST_SETPOS  =       121;
+  WAUM_VOL_SET          =       122;
+  WAUM_PAN_SET          =       123;
+  WAUM_PLAYLIST_COUNT   =       124;
+  WAUM_PLAYLIST_GETINDEX=       125;
+  WAUM_TRACK_INFO       =       126;
+  WAUM_EQ_DATA          =       127;
+  WAUM_EQ_AUTOLOAD      =       128;
+  WAUM_BOOKMARK_ADDFILE =       129;
+  WAUM_RESTART          =       135;
+
+  // Documented by NSDN as PLUGIN ONLY but some DO work outside of Winamp plugins
+  WAUM_INET_AVAIL       =       242; // GetInternet
+  WAUM_TITLE_UPDATE     =       243; // UpdateInfo
+  WAUM_SHUFFLE_GET      =       250; // GetShuffle
+  WAUM_REPEAT_GET       =       251; // GetRepeat
+  WAUM_SHUFFLE_SET      =       252; // SetShuffle
+  WAUM_REPEAT_SET       =       253; // SetRepeat
+
+  // WinAmp Playback Status
+  WAPS_PLAYING = 1;
+  WAPS_STOPPED = 2;
+  WAPS_PAUSED  = 3;
+
+  // WinAmp Time Display Mode
+  WATDM_UNKNOWN   = 1;
+  WATDM_ELAPSED   = 2;
+  WATDM_REMAINING = 3;
+
+function WA_Handle: HWND;
+begin
+  result := FindWindow('Winamp v1.x', '');
+end;
+
+function WA_GetWinampTitle: String;
+begin
+  GetWindowText(WA_Handle, Result, sizeof(Result));
+end;
+
+function WA_GetTitle: String;
+begin
+  Result := GetAmpTitle;
+end;
+
+{ TODO (1.34.907)
+function GetWinAmpPath: string;
+var
+  TmpRegData: string;
+  Fnd: Integer;
+begin
+  TmpRegData := QueryValue(HKEY_CLASSES_ROOT, 'Winamp.File\DefaultIcon', '', '');
+  Fnd := Pos(',', TmpRegData);
+  if Fnd <> 0 then
+    Delete(TmpRegData, Fnd, Length(TmpRegData));
+  if FileExists(TmpRegData) then
+    result := ExtractFilePath(TmpRegData);
+end;
+}
+
+function WA_GetTrackFile: String;
+var
+  pos,i: Integer;
+  pls: TStringList;
+begin
+  pls := TStringList.Create;
+  
+  if not WA_IsRunning then Exit;
+  
+  WA_PlaylistSave;
+  pos := WA_GetPlaylistIndex-1;
+    
+  if not FileExists(WA_M3U) then
+  begin
+    Echo(GetBCol(bcInfo), nil, '', '* WinampAPI * Could not find ' + WA_M3U, CurServer);
+    Exit;
+  end;
+
+  pls.LoadFromFile(WA_M3U);
+
+  i := 0;
+  while i < pls.Count do
+  begin
+    { HAX (1.34.907) : OPS bug requires copy(pls[i],1,1) instead of pls[i][1]/pls.items[i][1] }
+    if (pls[i] <> '') and (copy(pls[i],1,1) = '#') then
+    begin
+      pls.Delete(i);
+    end;
+    i := i + 1;
+  end;
+
+  Result := pls[pos + 1];
+
+  pls.Free;
+end;
+
+// CORE FUNCTIONS, ALPHABETICAL
+
+procedure WA_Activate; // call before opening dialogs or similar when you want the winamp window to come to the top
+begin
+  WA_Start;
+  If (WA_IsRunning = 0) then
+    Sleep(WA_DELAY_START);
+  Sleep(WA_DELAY_ACTIVATE);
+end;
+
+{ HAX : no pointers in OPS, Word(Pchar(Filename))
+procedure WA_AddToBookmarkList(FileName: String);
+begin
+  SendMessage(WA_Handle,WM_USER,Word(Pchar(FileName)),WAUM_BOOKMARK_ADDFILE);
+end;
+}
+
+{ HAX : no pointers on OPS, @cds
+procedure WA_ChangeDir(Value: String);
+var cds : COPYDATASTRUCT;
+begin
+  cds.dwData := WAUM_CHDIR;
+  cds.lpData := PChar(Value);
+  cds.cbData := Length(Value)+1;
+  SendMessage(WA_Handle,WM_COPYDATA,0,Integer(@cds));
+end;
+}
+
+function WA_GetEQData(Index: Integer): Byte;
+begin
+  Result := Byte(SendMessage(WA_Handle,WM_USER,Index,WAUM_EQ_DATA));
+end;
+
+function WA_GetEQEnabled: Boolean;
+begin
+  Result := (SendMessage(WA_Handle,WM_USER,11,WAUM_EQ_DATA) <> 0);
+end;
+
+function WA_GetEQPreamp: Byte;
+begin
+  Result := Byte(SendMessage(WA_Handle,WM_USER,10,WAUM_EQ_DATA));
+end;
+
+function WA_GetInternet: Boolean;
+begin
+  Result := (SendMessage(WA_Handle,WM_USER,0,WAUM_INET_AVAIL) = 1)
+end;
+
+function WA_GetPlayBackStatus: Integer;
+var ret : Integer;
+begin
+  ret := SendMessage(WA_Handle,WM_USER,0,WAUM_PLAYBACK_STATUS);
+  if (ret = WAPS_PLAYING) or (ret = WAPS_PAUSED) then
+    Result := ret
+  else
+    Result := WAPS_STOPPED;
+end;
+
+function WA_GetPlaylistCount: Integer;
+begin
+  Result := SendMessage(WA_Handle,WM_USER,0,WAUM_PLAYLIST_COUNT);
+end;
+
+function WA_GetPlaylistIndex: Integer;
+begin
+  Result := SendMessage(WA_Handle,WM_USER,0,WAUM_PLAYLIST_GETINDEX)+1;
+end;
+
+function WA_GetRepeat: Boolean;
+begin
+  Result := (SendMessage(WA_Handle,WM_USER,0,WAUM_REPEAT_GET) = 1)
+end;
+
+function WA_GetScriptVersion: Integer;
+begin
+  Result := WA_VERSION;
+end;
+
+function WA_GetShuffle: Boolean;
+begin
+  Result := (SendMessage(WA_Handle,WM_USER,0,WAUM_SHUFFLE_GET) = 1)
+end;
+
+function WA_GetTrackBitRate: Integer;
+begin
+  Result := SendMessage(WA_Handle,WM_USER,1,WAUM_TRACK_INFO);
+end;
+
+function WA_GetTrackChannels: Integer;
+begin
+  Result := SendMessage(WA_Handle,WM_USER,2,WAUM_TRACK_INFO);
+end;
+
+function WA_GetTrackFilesize: Integer;
+begin
+  Result := FileSize(WA_GetTrackFile); 
+end;
+
+function WA_GetTrackLength: Longword;
+begin
+  Result := SendMessage(WA_Handle,WM_USER,1,WAUM_TRACK_LENGTH);
+end;
+
+function WA_GetTrackPosition: Integer;
+begin
+  Result := SendMessage(WA_Handle,WM_USER,0,WAUM_PLAYBACK_POS);
+end;
+
+function WA_GetTrackSampleRate: Integer;
+begin
+  Result := SendMessage(WA_Handle,WM_USER,0,WAUM_TRACK_INFO);
+end;
+
+function WA_GetVersion: Integer;
+var ver : Word;
+begin
+  Result := SendMessage(WA_Handle,WM_USER,0,WAUM_VERSION);
+end;
+
+function WA_IsPaused: Boolean;
+begin
+  Result := (WA_GetPlayBackStatus = WAPS_PAUSED);
+end;
+
+function WA_IsPlaying: Boolean;
+begin
+  Result := (WA_GetPlayBackStatus = WAPS_PLAYING);  
+end;
+
+function WA_IsReady: Boolean; // true after winamp starts and first song starts
+begin
+  Result := WA_IsRunning and (copy(WA_GetWinampTitle,1,9) <> 'Winamp 2.');
+end;
+
+function WA_IsRunning: Boolean;
+begin
+  Result := (WA_Handle <> 0);
+end;
+
+function WA_IsStopped: Boolean;
+begin
+  Result := (WA_GetPlayBackStatus = WAPS_STOPPED);
+end;
+
+procedure WA_Open(Filename: String);
+begin
+  WA_Run(' "' + Filename + '"');
+end;
+
+procedure WA_OpenAdd(Filename: String);
+begin
+  WA_Run(' /ADD "' + Filename + '"');
+end;
+
+procedure WA_OpenNew(Filename: String); // WinampZ-DJ
+begin
+  WA_Run(' /NEW "' + Filename + '"');
+end;
+
+// In most cases, scripters will want to call Activate before Open dialogs and similar.
+procedure WA_OpenFileDialog;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_OPEN_FILE,0);
+end;
+
+procedure WA_OpenInfoDialog;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_FILE_INFO,0);
+end;
+
+procedure WA_OpenJumpToFile;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_OPEN_JUMPFILE,0);
+end;
+
+procedure WA_OpenJumpToTime;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_OPEN_JUMPTIME,0);
+end;
+
+procedure WA_OpenURLDialog;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_OPEN_URL,0);
+end;
+
+procedure WA_PlaylistClear;
+begin
+  SendMessage(WA_Handle,WM_USER,0,WAUM_PLAYLIST_CLEAR);
+end;
+
+procedure WA_PlaylistEnd;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_PLAYLIST_END,0);
+end;
+
+function WA_PlaylistSave: Longword;
+begin
+  Result := SendMessage(WA_Handle,WM_USER,0,WAUM_PLAYLIST_WRITE);
+end;
+
+procedure WA_PlaylistStart;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_PLAYLIST_START,0);
+end;
+
+procedure WA_Quit;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_QUIT,0);
+end;
+
+procedure WA_Restart;
+begin
+  SendMessage(WA_Handle,WM_USER,0,WAUM_RESTART);
+end;
+
+procedure WA_Run(Parameters: String);
+begin
+  if not FileExists(WA_DIR + WA_EXE) then
+  begin
+    Echo(GetBCol(bcInfo), nil, '', '* WinampAPI * Could not find ' + WA_DIR + WA_EXE, CurServer);
+    Exit;
+  end;
+  run(WA_DIR + WA_EXE + Parameters);
+end;
+
+procedure WA_SetEQData(Index: Integer; Value: Byte);
+begin
+  SendMessage(WA_Handle,WM_USER,Index,WAUM_EQ_DATA);
+  SendMessage(WA_Handle,WM_USER,Value,WAUM_EQ_AUTOLOAD);
+end;
+
+procedure WA_SetPanning(Value: Byte);
+begin
+  SendMessage(WA_Handle,WM_USER,Value,WAUM_PAN_SET);
+end;
+
+procedure WA_SetPlaylistIndex(Value: Integer);
+begin
+  SendMessage(WA_Handle,WM_User,Value-1,WAUM_PLAYLIST_SETPOS);
+end;
+
+procedure WA_SetRepeat(Value: Boolean);
+begin
+  SendMessage(WA_Handle,WM_User,Ord(Value),WAUM_REPEAT_SET);
+end;
+
+procedure WA_SetShuffle(Value: Boolean);
+begin
+  SendMessage(WA_Handle,WM_User,Ord(Value),WAUM_SHUFFLE_SET);
+end;
+
+procedure WA_SetTimeDisplayMode(Value: Integer);
+begin
+  if Value = WATDM_ELAPSED then
+    SendMessage(WA_Handle,WM_COMMAND,WACM_TIME_ELAPSED,0);
+  if Value = WATDM_REMAINING then
+    SendMessage(WA_Handle,WM_COMMAND,WACM_TIME_REMAINING,0);
+end;
+
+procedure WA_SetTrackPosition(Value: Longword);
+begin
+  SendMessage(WA_Handle,WM_USER,Value,WAUM_PLAYBACK_SEEK);
+end;
+
+procedure WA_SetVolume(Value: Byte);
+begin
+  SendMessage(WA_Handle,WM_USER,Value,WAUM_VOL_SET);
+end;
+
+procedure WA_SkinReload;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_SKIN_RELOAD,0);
+end;
+
+procedure WA_SkinSelect;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_OPEN_SKINSEL,0);
+end;
+
+procedure WA_Start;
+begin
+  WA_Run('');
+end;
+
+procedure WA_ToggleAbout;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_ABOUT,0);
+end;
+
+procedure WA_ToggleAlwaysOnTop;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_ALWAYSONTOP,0);
+end;
+
+procedure WA_ToggleAutoScroll;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_TITLE_SCROLL,0);
+end;
+
+procedure WA_ToggleBrowser;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_BROWSER,0);
+end;
+
+procedure WA_ToggleDoubleSize;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_DOUBLESIZE,0);
+end;
+
+procedure WA_ToggleEasyMove;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_EASYMOVE,0);
+end;
+
+procedure WA_ToggleEQ;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_EQ,0);
+end;
+
+procedure WA_ToggleMain;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_MAIN,0);
+end;
+
+procedure WA_TogglePL;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_PL,0);
+end;
+
+procedure WA_TogglePlaylistWindowShade;
+begin
+    SendMessage(WA_Handle,WM_COMMAND,WACM_WINSH_PL,0);
+end;
+
+procedure WA_TogglePreferences;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_PREFERENCES,0);
+end;
+
+procedure WA_ToggleRepeat;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_REPEAT,0);
+end;
+
+procedure WA_ToggleShuffle;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_SHUFFLE,0);
+end;
+
+procedure WA_ToggleWindowShade;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_WINSH,0);
+end;
+
+procedure WA_TrackContinue;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_CONTINUE,0);
+end;
+
+procedure WA_TrackFF;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_FF_5SECS,0);
+end;
+
+procedure WA_TrackFR;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_FR_5SECS,0);
+end;
+
+procedure WA_TrackNext;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_TRACK_NEXT,0);
+end;
+
+procedure WA_TrackPause;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_PAUSE,0);
+end;
+
+procedure WA_TrackPlay;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_PLAY_CUR,0);
+end;
+
+procedure WA_TrackPlaySelected;
+begin
+  SendMessage(WA_Handle,WM_USER,0,WAUM_PLAY_SEL_TRACK);
+end;
+
+procedure WA_TrackPrev;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_TRACK_PREV,0);
+end;
+
+procedure WA_TrackStop;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_STOP,0);
+end;
+
+procedure WA_TrackStopAfter;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_STOP_AFTERENDED,0)
+end;
+
+procedure WA_TrackStopFade;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_STOP_FADEOUT,0);
+end;
+
+procedure WA_UpdateInfo;
+begin
+  SendMessage(WA_Handle,WM_USER,0,WAUM_TITLE_UPDATE);
+end;
+
+procedure WA_VizConfigurePlugIn;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_VIZ_PLUGINCONF,0);
+end;
+
+procedure WA_VizExec;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_VIZ_EXEC,0);
+end;
+
+procedure WA_VizOpenOptions;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_VIZ_OPTIONS,0);
+end;
+
+procedure WA_VizOpenPluginOptions;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_VIZ_PLUGINOPTS,0);
+end;
+
+procedure WA_VolLower;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_VOL_LOWER,0);
+end;
+
+procedure WA_VolRaise;
+begin
+  SendMessage(WA_Handle,WM_COMMAND,WACM_VOL_RAISE,0);
+end;
+
+// UTIL
+
+function WA_sec2str(sec: Integer): String;
+var
+  secmod : Integer;
+begin
+  if (sec = -1) then
+    Result := '~'
+  else
+  begin
+    Result := IntToStr(trunc(sec / 60)) + ':';
+    secmod := sec mod 60;
+    if (secmod < 10) then
+      Result := Result + '0';
+    Result := Result + IntToStr(secmod);
+   end;
+end;
+
+function WA_ms2str(ms: Integer): String;
+begin
+  Result := WA_sec2str(WA_ms2sec(ms));
+end;
+
+function WA_ms2sec(ms: Integer): Integer;
+begin
+  Result := ms div 1000;
+end;
+
+procedure WA_DummySong;
+begin
+  say(
+    WA_GetTitle+' '+
+    '('+WA_ms2str(WA_GetTrackPosition)+'/'+WA_sec2str(WA_GetTrackLength)+')'+
+    '['+IntToStr(WA_GetPlaylistIndex)+'/'+IntToStr(WA_GetPlaylistCount)+']'+
+    '['+IntToStr(WA_GetTrackBitrate)+'Kbps'+']'+
+    '['+IntToStr(WA_GetTrackSampleRate)+'KHz'+']'
+  );
+end;
+
+procedure WA_DummyVersion;
+begin
+  say('WinampAPI Version '+IntToStr(WA_GetScriptVersion)+' ('+IntToStr(WA_GetVersion)+')');
+end;
+
+end.

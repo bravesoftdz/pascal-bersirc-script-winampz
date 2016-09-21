@@ -1,0 +1,37 @@
+{ WinampZ front end to WinampAPI.ops
+
+  Put all files in the Scripts directory and add WinampZ
+  near the top of Bersirc.ops on the 'uses' line, eg:
+
+    uses Extras, Events, Menus, Nickcomp, WinampZ;
+
+  The following are the 'simple' WinampZ commands.
+  Try them all with Winamp both closed and open.
+
+    /song, /songa, /rand, /open, /send <nick>
+  
+  Most commands are provided in a more cryptic z form.
+  The following do the same as the simple ones above.
+  
+    /z,    /za,    /zr,   /zz,   /zs <nick>
+  
+  There are more z functions, like /zget & whatever is
+  added in the future. These are what I use personally.
+  The 'simple' wrappers are there for casual users, and
+  as a quick way to customize.
+    
+  Additionally initial support has been added to allow
+  people to /ctcp <yournick> !ZGET for song dcc's. This
+  behaviour is configurable with WZ_GET* constants below.
+  ZGET functionality is disabled by default. /songa & /za
+  will enabled ZGET, and /zget toggles it on and off.
+  
+  Experiment with some WinampAPI.ops procedures directly
+  eg. /WA_TrackStopFade, /WA_ToggleAlwaysOnTop, /WA_Restart
+  See WinampAPI.txt & WinampAPI.ops for more information
+
+  The power is in WinampAPI.ops, this script is just an
+  example using that power. Contributions to this script
+  using WinampAPI.ops are welcome.
+
+}
